@@ -1,0 +1,13 @@
+name = "reminders"
+main = "src/worker.js"
+compatibility_date = "2025-06-01"
+
+# Runs the reminder check every 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Storage for your shows, notes and settings.
+# Replace the id with the one printed by:  npx wrangler kv namespace create DATA
+[[kv_namespaces]]
+binding = "DATA"
+id = "REPLACE_WITH_YOUR_KV_ID"

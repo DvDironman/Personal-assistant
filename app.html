@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reminders</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.png">
+<meta name="theme-color" content="#141826">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{--bg:#141826;--card:#1e2336;--card2:#262c44;--line:#323a58;--text:#eef0f8;--mut:#9aa1bd;--acc:#7c5cff;--ok:#2fbf71;--warn:#ff6b6b;--amber:#f5b942}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  main{padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:560px;margin:0 auto;padding-top:calc(16px + env(safe-area-inset-top))}
+  h1{font-size:26px;margin:4px 0 14px}
+  h2{font-size:15px;margin:0 0 8px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:12px}
+  .row{display:flex;gap:10px;align-items:center}
+  .sp{flex:1;min-width:0}
+  .mut{color:var(--mut);font-size:14px}
+  .big{font-size:20px;font-weight:650}
+  button{font:inherit;border:0;border-radius:12px;padding:10px 14px;background:var(--card2);color:var(--text);cursor:pointer}
+  button.pri{background:var(--acc);font-weight:600}
+  button.ok{background:var(--ok);font-weight:600;color:#06200f}
+  button.ghost{background:transparent;color:var(--mut);padding:8px}
+  button.full{width:100%;padding:14px;font-size:17px}
+  button.sm{padding:6px 10px;font-size:14px;border-radius:10px}
+  input,textarea,select{font:inherit;width:100%;background:var(--card2);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:11px 12px}
+  textarea{min-height:90px;resize:vertical}
+  label{display:block;font-size:14px;color:var(--mut);margin:10px 0 4px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .chip{padding:7px 12px;border-radius:999px;background:var(--card2);font-size:14px;border:1px solid transparent}
+  .chip.on{background:rgba(124,92,255,.25);border-color:var(--acc)}
+  .item{padding:12px 0;border-top:1px solid var(--line)}
+  .item:first-of-type{border-top:0}
+  .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--mut)}
+  .badge.acc{background:rgba(124,92,255,.25);color:#cfc4ff}
+  .badge.warn{background:rgba(255,107,107,.18);color:#ffb3b3}
+  .ep{font-variant-numeric:tabular-nums;font-weight:650}
+  .done{opacity:.5;text-decoration:line-through}
+  .pill-due{border:1px solid var(--warn)}
+  .pill-ok{border:1px solid rgba(47,191,113,.5)}
+  nav{position:fixed;left:0;right:0;bottom:0;background:rgba(20,24,38,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;background:none;border-radius:0;padding:10px 0 12px;color:var(--mut);font-size:12px;display:flex;flex-direction:column;align-items:center;gap:2px}
+  nav button span{font-size:22px}
+  nav button.on{color:var(--text)}
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center;z-index:10}
+  .sheet.open{display:flex}
+  .sheet>div{background:var(--card);width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom));background:#000;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+  .toast.show{opacity:.92}
+  .empty{color:var(--mut);text-align:center;padding:14px 0;font-size:15px}
+</style>
+</head>
+<body>
+<main id="app"><div class="empty">Loading…</div></main>
+<nav id="nav">
+  <button data-tab="today"><span>🏠</span>Today</button>
+  <button data-tab="shows"><span>📺</span>Shows</button>
+  <button data-tab="notes"><span>📝</span>Notes</button>
+  <button data-tab="settings"><span>⚙️</span>Settings</button>
+</nav>
+<div class="sheet" id="sheet"><div id="sheetBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+let S = null;
+let tab = (location.hash || "#today").slice(1);
+let token = localStorage.getItem("token") || "";
+let noteRemind = null; // pending reminder for the new-note composer
+let showFilter = "watching";
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 1800); }
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token } });
+  if (r.status === 401) { token = ""; localStorage.removeItem("token"); render(); throw new Error("unauthorized"); }
+  const j = await r.json();
+  if (!r.ok) { toast(j.error || "Something went wrong"); throw new Error(j.error); }
+  return j;
+}
+async function op(name, data, msg) { S = await api("/api/op", { method: "POST", body: JSON.stringify({ op: name, data }) }); render(); if (msg) toast(msg); }
+async function refresh() { if (!token) return render(); try { S = await api("/api/state"); } catch (e) {} render(); }
+
+// ---------- formatting ----------
+function fmtWhen(iso) {
+  const d = new Date(iso), now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const dayDiff = Math.round((new Date(d.toDateString()) - new Date(now.toDateString())) / 864e5);
+  if (dayDiff === 0) return "Today " + time;
+  if (dayDiff === 1) return "Tomorrow " + time;
+  if (dayDiff === -1) return "Yesterday " + time;
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " " + time;
+}
+const epStr = (s) => (s.season ? "S" + s.season + " " : "") + (s.episode ? "E" + s.episode : s.season ? "" : "Not started");
+function at(daysAhead, h, m) { const d = new Date(); d.setDate(d.getDate() + daysAhead); d.setHours(h, m, 0, 0); return d; }
+function quickTimes() {
+  const now = new Date(), tonight = at(0, 20, 0);
+  const list = [["In 1 hour", new Date(Date.now() + 36e5)]];
+  if (tonight > now) list.push(["Tonight 20:00", tonight]);
+  list.push(["Tomorrow 09:00", at(1, 9, 0)], ["Tomorrow 20:00", at(1, 20, 0)], ["In a week", at(7, 9, 0)]);
+  return list;
+}
+const toLocalInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+
+// ---------- views ----------
+function viewLogin() {
+  return `<h1>Reminders</h1><div class="card">
+    <p class="mut" style="margin-top:0">Enter the APP_TOKEN you set when deploying. It's saved on this device only.</p>
+    <input id="tok" type="password" placeholder="App token" autocomplete="current-password">
+    <div style="height:10px"></div><button class="pri full" onclick="login()">Unlock</button></div>`;
+}
+async function login() { token = $("#tok").value.trim(); localStorage.setItem("token", token); await refresh(); }
+
+function viewToday() {
+  const st = S.settings, p = S.pills, g = S.gymTomorrow;
+  const due = !S.pillsTakenToday && st.pillTime && S.nowHM >= st.pillTime;
+  const snoozed = !S.pillsTakenToday && p.snoozeUntil > Date.now();
+  const pills = S.pillsTakenToday
+    ? `<div class="card pill-ok"><div class="row"><div class="sp"><div class="big">💊 Pills taken ✅</div>
+         <div class="mut">at ${new Date(p.takenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
+         <button class="ghost sm" onclick="op('pills.undo',{},'Marked as not taken')">Undo</button></div></div>`
+    : `<div class="card ${due ? "pill-due" : ""}"><div class="big">💊 ${due ? "Take your pills" : "Pills"}</div>
+         <div class="mut" style="margin:4px 0 12px">${due
+            ? (snoozed ? "Snoozed until " + new Date(p.snoozeUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "I'll keep reminding you every " + st.pillRepeatMin + " min until you tap the button.")
+            : st.pillTime ? "Reminder at " + st.pillTime : "No reminder time set"}</div>
+         <button class="ok full" onclick="op('pills.taken',{},'Nice, marked as taken')">I took my pills</button></div>`;
+
+  const gymWhy = g.overridden ? " (changed for this week)" : "";
+  const gym = `<div class="card"><div class="row"><div class="sp">
+      <div class="big">${g.isGym ? "🏋️ Gym tomorrow" : "😌 Rest day tomorrow"}</div>
+      <div class="mut">${DAYS[g.weekday]}${gymWhy}${g.isGym ? " · gym-clothes reminder at " + st.gymTime : ""}</div></div></div>
+      <div class="chips">
+        <button class="chip ${g.isGym ? "on" : ""}" onclick="op('gym.override',{date:'${g.date}',value:true},'Gym tomorrow')">Working out</button>
+        <button class="chip ${!g.isGym ? "on" : ""}" onclick="op('gym.override',{date:'${g.date}',value:false},'Rest day tomorrow')">Not working out</button>
+        ${g.overridden ? `<button class="chip" onclick="op('gym.override',{date:'${g.date}',value:null},'Back to usual schedule')">Use usual schedule</button>` : ""}
+      </div></div>`;
+
+  const upcoming = S.notes.filter((n) => n.remindAt && !n.done && !n.reminded).sort((a, b) => a.remindAt.localeCompare(b.remindAt)).slice(0, 4);
+  const watching = S.shows.filter((s) => s.status === "watching").slice(0, 4);
+  return `<h1>Today</h1>${pills}${gym}
+    <div class="card"><h2>Coming up</h2>${upcoming.length ? upcoming.map((n) => `<div class="item"><div>${esc(n.text)}</div><div class="mut">🔔 ${fmtWhen(n.remindAt)}</div></div>`).join("") : `<div class="empty">No note reminders scheduled</div>`}</div>
+    <div class="card"><h2>Watching</h2>${watching.length ? watching.map(showRow).join("") : `<div class="empty">Nothing yet. Add a show in the Shows tab.</div>`}</div>`;
+}
+
+function showRow(s) {
+  return `<div class="item row"><div class="sp" onclick="editShow('${s.id}')">
+      <div style="font-weight:600">${esc(s.title)}</div>
+      <div class="mut"><span class="ep">${esc(epStr(s))}</span>${s.platform ? " · " + esc(s.platform) : ""}${s.note ? " · " + esc(s.note) : ""}</div></div>
+      ${s.status === "watching" ? `<button class="sm" onclick="op('show.next',{id:'${s.id}'},'Next episode')">+1 ep</button>` : `<span class="badge">${s.status}</span>`}</div>`;
+}
+function viewShows() {
+  const list = S.shows.filter((s) => s.status === showFilter);
+  const counts = (st) => S.shows.filter((s) => s.status === st).length;
+  return `<div class="row"><h1 class="sp">Shows</h1><button class="pri" onclick="editShow()">+ Add</button></div>
+    <div class="chips" style="margin:-4px 0 12px">${["watching", "paused", "finished"].map((f) => `<button class="chip ${showFilter === f ? "on" : ""}" onclick="showFilter='${f}';render()">${f[0].toUpperCase() + f.slice(1)} (${counts(f)})</button>`).join("")}</div>
+    <div class="card">${list.length ? list.map(showRow).join("") : `<div class="empty">No ${showFilter} shows</div>`}</div>`;
+}
+function editShow(id) {
+  const s = S.shows.find((x) => x.id === id) || { title: "", platform: "", season: 1, episode: 1, note: "", status: "watching" };
+  openSheet(`<h1>${id ? "Edit show" : "Add show"}</h1>
+    <label>Title</label><input id="f_title" value="${esc(s.title)}" placeholder="e.g. Severance">
+    <label>Where you watch it</label><input id="f_platform" value="${esc(s.platform)}" placeholder="Netflix, Apple TV, HOT…" list="plats">
+    <datalist id="plats"><option>Netflix<option>Apple TV+<option>Disney+<option>HBO Max<option>Prime Video<option>YES<option>HOT<option>Cellcom TV<option>YouTube</datalist>
+    <div class="grid2"><div><label>Season</label><input id="f_season" type="number" inputmode="numeric" min="0" value="${s.season}"></div>
+      <div><label>Episode (where you are)</label><input id="f_episode" type="number" inputmode="numeric" min="0" value="${s.episode}"></div></div>
+    <label>Note (optional)</label><input id="f_note" value="${esc(s.note)}" placeholder="e.g. stopped at 23:40">
+    <label>Status</label><select id="f_status">${["watching", "paused", "finished"].map((x) => `<option ${s.status === x ? "selected" : ""}>${x}</option>`).join("")}</select>
+    <div style="height:14px"></div><button class="pri full" onclick="saveShow('${id || ""}')">Save</button>
+    ${id ? `<div style="height:8px"></div><button class="ghost full" style="color:var(--warn)" onclick="if(confirmDel())op('show.delete',{id:'${id}'},'Deleted').then(closeSheet)">Delete show</button>` : ""}`);
+  if (!id) setTimeout(() => $("#f_title").focus(), 50);
+}
+async function saveShow(id) {
+  await op("show.save", { id: id || undefined, title: $("#f_title").value, platform: $("#f_platform").value, season: $("#f_season").value, episode: $("#f_episode").value, note: $("#f_note").value, status: $("#f_status").value }, "Saved");
+  closeSheet();
+}
+
+function remindChips(current, onPick) {
+  return `<div class="chips">${quickTimes().map(([l, d]) => `<button class="chip ${current && Math.abs(new Date(current) - d) < 6e4 ? "on" : ""}" onclick="${onPick}('${d.toISOString()}')">${l}</button>`).join("")}
+    <button class="chip" onclick="${onPick}('custom')">Pick a time…</button>
+    ${current ? `<button class="chip" onclick="${onPick}(null)">No reminder</button>` : ""}</div>`;
+}
+function viewNotes() {
+  const open = S.notes.filter((n) => !n.done), done = S.notes.filter((n) => n.done);
+  const row = (n) => `<div class="item"><div class="row" style="align-items:flex-start">
+      <button class="ghost sm" style="font-size:20px;padding:0 6px" onclick="op('note.done',{id:'${n.id}',done:${!n.done}})">${n.done ? "☑️" : "⬜"}</button>
+      <div class="sp" onclick="editNote('${n.id}')"><div class="${n.done ? "done" : ""}" style="white-space:pre-wrap">${esc(n.text)}</div>
+        <div class="mut">${fmtWhen(new Date(n.createdAt).toISOString())}
+        ${n.remindAt ? ` · <span class="badge ${n.reminded ? "" : new Date(n.remindAt) < new Date() ? "warn" : "acc"}">🔔 ${fmtWhen(n.remindAt)}${n.reminded ? " (sent)" : ""}</span>` : ""}</div></div></div></div>`;
+  return `<h1>Notes</h1>
+    <div class="card"><textarea id="newNote" placeholder="What's on your mind?"></textarea>
+      <div class="mut" style="margin-top:8px">Remind me: <b id="remindLbl">${noteRemind ? fmtWhen(noteRemind) : "no reminder"}</b></div>
+      ${remindChips(noteRemind, "pickNewRemind")}
+      <div style="height:12px"></div><button class="pri full" onclick="addNote()">Save note</button></div>
+    <div class="card"><h2>Notes</h2>${open.length ? open.map(row).join("") : `<div class="empty">No notes yet</div>`}</div>
+    ${done.length ? `<div class="card"><h2>Done</h2>${done.slice(0, 30).map(row).join("")}</div>` : ""}`;
+}
+function askCustom(cb, current) {
+  openSheet(`<h1>Remind me at</h1><input id="f_dt" type="datetime-local" value="${toLocalInput(current ? new Date(current) : new Date(Date.now() + 36e5))}">
+    <div style="height:14px"></div><button class="pri full" id="f_dt_ok">Set reminder</button>`);
+  $("#f_dt_ok").onclick = () => { const v = $("#f_dt").value; if (v) cb(new Date(v).toISOString()); };
+}
+function pickNewRemind(v) {
+  const txt = $("#newNote").value;
+  const apply = (iso) => { noteRemind = iso; closeSheet(); render(); $("#newNote").value = txt; };
+  if (v === "custom") return askCustom(apply, noteRemind);
+  apply(v);
+}
+async function addNote() {
+  const text = $("#newNote").value.trim();
+  if (!text) return toast("Write something first");
+  await op("note.save", { text, remindAt: noteRemind }, noteRemind ? "Saved, I'll remind you " + fmtWhen(noteRemind) : "Saved");
+  $("#newNote").value = ""; noteRemind = null; render();
+}
+let editRemind = null;
+function editNote(id) {
+  const n = S.notes.find((x) => x.id === id); if (!n) return;
+  editRemind = n.remindAt;
+  const draw = () => openSheet(`<h1>Edit note</h1><textarea id="f_text">${esc($("#f_text") ? $("#f_text").value : n.text)}</textarea>
+    <div class="mut" style="margin-top:8px">Remind me: <b>${editRemind ? fmtWhen(editRemind) : "no reminder"}</b></div>
+    ${remindChips(editRemind, "pickEditRemind")}
+    <div style="height:14px"></div><button class="pri full" onclick="op('note.save',{id:'${id}',text:$('#f_text').value,remindAt:editRemind},'Saved').then(closeSheet)">Save</button>
+    <div style="height:8px"></div><button class="ghost full" style="color:var(--warn)" onclick="if(confirmDel())op('note.delete',{id:'${id}'},'Deleted').then(closeSheet)">Delete note</button>`);
+  window.pickEditRemind = (v) => {
+    const text = $("#f_text").value;
+    if (v === "custom") return askCustom((iso) => { editRemind = iso; draw(); $("#f_text").value = text; }, editRemind);
+    editRemind = v; draw(); $("#f_text").value = text;
+  };
+  draw();
+}
+
+function viewSettings() {
+  const st = S.settings;
+  return `<h1>Settings</h1>
+    <div class="card"><h2>💊 Pills</h2>
+      <label>Reminder time</label><input id="s_pill" type="time" value="${st.pillTime}">
+      <label>If I haven't tapped "Taken", remind me again every</label>
+      <select id="s_rep">${[5, 10, 15, 20, 30, 60].map((m) => `<option value="${m}" ${st.pillRepeatMin == m ? "selected" : ""}>${m} minutes</option>`).join("")}</select></div>
+    <div class="card"><h2>🏋️ Gym</h2>
+      <label>Workout days</label>
+      <div class="chips" id="s_days">${DAYS.map((d, i) => `<button class="chip ${st.gymDays.includes(i) ? "on" : ""}" data-d="${i}" onclick="this.classList.toggle('on')">${d}</button>`).join("")}</div>
+      <label>Remind me to pack gym clothes the night before at</label><input id="s_gym" type="time" value="${st.gymTime}"></div>
+    <div class="card"><h2>General</h2>
+      <label>Time zone</label><input id="s_tz" value="${esc(st.tz)}"></div>
+    <button class="pri full" onclick="saveSettings()">Save settings</button>
+    <div style="height:12px"></div>
+    <div class="card"><h2>Notifications</h2>
+      <p class="mut" style="margin-top:0">Notifications come through the ntfy app on your phone. Tap below to check it works.</p>
+      <button class="full" onclick="testNotify()">Send a test notification</button></div>
+    <button class="ghost full" onclick="if(confirm('Sign out on this device?')){localStorage.removeItem('token');token='';render()}">Sign out on this device</button>`;
+}
+async function saveSettings() {
+  const gymDays = [...document.querySelectorAll("#s_days .chip.on")].map((b) => +b.dataset.d);
+  await op("settings", { pillTime: $("#s_pill").value, pillRepeatMin: +$("#s_rep").value, gymDays, gymTime: $("#s_gym").value, tz: $("#s_tz").value.trim() }, "Settings saved");
+}
+async function testNotify() {
+  const r = await api("/api/test", { method: "POST" });
+  toast(r.ok ? "Sent! Check your phone" : r.topicSet ? "ntfy refused it, check the topic" : "NTFY_TOPIC secret isn't set");
+}
+
+// ---------- shell ----------
+const confirmDel = () => confirm("Delete this? It can't be undone.");
+function openSheet(html) { $("#sheetBody").innerHTML = html; $("#sheet").classList.add("open"); }
+function closeSheet() { $("#sheet").classList.remove("open"); }
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
+
+function render() {
+  const app = $("#app");
+  $("#nav").style.display = token && S ? "flex" : "none";
+  if (!token) { app.innerHTML = viewLogin(); return; }
+  if (!S) { app.innerHTML = `<div class="empty">Loading…</div>`; return; }
+  if (!["today", "shows", "notes", "settings"].includes(tab)) tab = "today";
+  const draft = $("#newNote") ? $("#newNote").value : "";
+  app.innerHTML = { today: viewToday, shows: viewShows, notes: viewNotes, settings: viewSettings }[tab]();
+  if ($("#newNote") && draft) $("#newNote").value = draft;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+}
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; history.replaceState(null, "", "#" + tab); render(); window.scrollTo(0, 0); });
+window.addEventListener("hashchange", () => { tab = location.hash.slice(1); render(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+refresh();
+</script>
+</body>
+</html>
